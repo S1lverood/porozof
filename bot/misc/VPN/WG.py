@@ -3,6 +3,8 @@ import logging
 import os
 import aiofiles
 import httpx
+import asyncio
+import tempfile
 from bot.database.methods.update import server_space_update
 
 class WireGuard:
@@ -26,7 +28,7 @@ class WireGuard:
         """
         self.chat_id = chat_id
         self.s_id = server
-        self.server = self.servers.get(server) if server != "all" else "all"
+        self.server = self.servers.get(server) if server != "all" else None
 
     async def add_user(self) -> str:
         """
@@ -38,10 +40,12 @@ class WireGuard:
         try:
             async with httpx.AsyncClient() as client:
                 # Удаление пользователя с других серверов
-                if self.server != "all":
-                    for s_id, server_info in self.servers.items():
-                        if s_id != self.s_id:
-                            await self._delete_user_from_server(client, server_info['url'],s_id)
+                if self.server:
+                    tasks = [
+                        self._delete_user_from_server(client, info['url'], s_id)
+                        for s_id, info in self.servers.items() if s_id != self.s_id
+                    ]
+                    await asyncio.gather(*tasks)
 
                 # Добавление пользователя на выбранный сервер
                 file_path = await self._create_user_on_server(client)
@@ -53,14 +57,28 @@ class WireGuard:
     async def delete_user(self):
         """
         Удаляет пользователя с сервера или всех серверов.
+        Удаляет конфигурационный файл после удаления пользователя.
         """
         try:
             async with httpx.AsyncClient() as client:
-                if self.server == "all":
-                    for s_id,server_info in self.servers.items():
-                        await self._delete_user_from_server(client, server_info['url'],s_id)
-                else:
-                    await self._delete_user_from_server(client, self.server['url'],int(self.s_id))
+                tasks = [
+                    self._delete_user_from_server(client, info['url'], s_id)
+                    for s_id, info in self.servers.items()
+                ] if self.server is None else [
+                    self._delete_user_from_server(client, self.server['url'], int(self.s_id))
+                ]
+                await asyncio.gather(*tasks)
+
+            # Формируем путь к конфигурационному файлу
+            file_path = f'/app/bot/WG/files/PorozoffVPN-{self.s_id}-{self.chat_id}.conf'
+
+            # Удаляем файл, если он существует
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                logging.info(f"Config file {file_path} deleted successfully.")
+            else:
+                logging.warning(f"Config file {file_path} not found.")
+        
         except Exception as e:
             logging.error(f"Error in delete_user: {e}")
             raise
@@ -78,6 +96,10 @@ class WireGuard:
         response.raise_for_status()
 
         response_data = response.json()
+        if 'url' not in response_data:
+            logging.error(f"Invalid response from server: {response_data}")
+            raise ValueError("Missing URL in response")
+
         file_path = f'/app/bot/WG/files/PorozoffVPN-{self.s_id}-{self.chat_id}.conf'
 
         # Сохраняем конфигурационный файл
@@ -90,12 +112,13 @@ class WireGuard:
         await server_space_update(f"WG_{self.s_id}", response_data['space'])
         return file_path
 
-    async def _delete_user_from_server(self, client: httpx.AsyncClient, server_url: str,server_id: int):
+    async def _delete_user_from_server(self, client: httpx.AsyncClient, server_url: str, server_id: int):
         """
         Удаляет пользователя с сервера.
 
         :param client: Асинхронный клиент httpx.
         :param server_url: URL сервера для удаления пользователя.
+        :param server_id: ID сервера для логирования и обновления информации.
         """
         try:
             url = server_url + "/deleteWG"
@@ -107,3 +130,4 @@ class WireGuard:
             logging.info(f"User {self.chat_id} removed from server {server_url}")
         except httpx.RequestError as e:
             logging.error(f"Failed to remove user from {server_url}: {e}")
+            raise
