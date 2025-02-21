@@ -1,0 +1,84 @@
+version: '3'
+
+volumes:
+  postgres_db_vol:
+  pgadmin-data:
+
+services:
+
+  db_postgres:
+    image: postgres:latest
+    container_name: postgres_db_container
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_db_vol:/var/lib/postgresql/data
+
+  pgadmin:
+    container_name: pgadmin_container
+    image: dpage/pgadmin4:8.6
+    depends_on:
+      - db_postgres
+    env_file:
+      - .env
+    volumes:
+      - pgadmin-data:/var/lib/pgadmin
+    ports:
+      - "5050:80"
+    restart: unless-stopped
+
+  wireguard:
+    image: lscr.io/linuxserver/wireguard
+    container_name: wireguard
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/London
+      - SERVERURL=auto #optional
+      - SERVERPORT=51820 #optional
+      - PEERS=4 #optional
+      - PEERDNS=auto #optional
+      - INTERNAL_SUBNET=10.13.13.0 #optional
+      - ALLOWEDIPS=0.0.0.0/0 #optional
+    volumes:
+      - ~/wireguard/config:/config
+      - /lib/modules:/lib/modules
+    ports:
+      - 51820:51820/udp
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+    restart: unless-stopped
+
+  vpn_hub_bot:
+    restart: unless-stopped
+    build: ./
+    env_file:
+      - .env
+    environment:
+      - ADMIN_TG_ID
+      - CRYPTO_BOT_API
+      - CRYPTOMUS_KEY
+      - CRYPTOMUS_UUID
+      - LAVA_ID_PROJECT
+      - LAVA_TOKEN_SECRET
+      - NAME
+      - TG_TOKEN
+      - WALLET_PAY_TOKEN
+      - YOOKASSA_SECRET_KEY
+      - YOOKASSA_SHOP_ID
+      - YOOMONEY_TOKEN
+      - YOOMONEY_WALLET
+    volumes:
+      - ./logs:/app/logs
+      - ./bot/WG:/app/bot/WG
+      - ./bot/locale:/app/bot/locale
+      - ./bot/img:/app/bot/img
+
+
+  

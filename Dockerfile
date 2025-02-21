@@ -1,0 +1,14 @@
+FROM python:3.11-slim
+ENV PYTHONDONTWRITEBYTECODE 1
+ENV PYTHONUNBUFFERED 1
+WORKDIR /app
+
+# Install gettext for translations
+RUN apt-get update && apt-get install -y gettext && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache -r /app/requirements.txt
+COPY run.py .
+COPY addusertovpn.sh .
+COPY bot /app/bot
+CMD ["python", "-m", "run"]
